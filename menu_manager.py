@@ -3,6 +3,7 @@ from display import Display
 from button_manager import ButtonManager
 from network_clock import NetworkClock
 from time import time_ns, sleep
+import random
 
 class MenuManager:
   menus = []
@@ -63,6 +64,7 @@ class MenuManager:
 
   # Takes the menu name
   def set_menu(self, menu_name):
+    if self.next_menu: return
     for menu in self.menus:
       if menu.menu_name == menu_name:
         self.next_menu = menu
@@ -117,17 +119,15 @@ class Clock(Menu):
     return (digits, commas)
 
   def handle_button(self, button, is_pressed):
-    if is_pressed and button == 5: self.manager.display.disable()
-    if is_pressed and button == 4: self.manager.display.enable()
+    if is_pressed and button == 5: self.manager.display.enable()
+    if is_pressed and button == 4: self.manager.display.disable()
+    if is_pressed and (button == 2 or button == 3): self.manager.set_menu("disco")
     if is_pressed and button == 0: self.manager.set_menu("date")
 
 class Date(Menu):
   menu_name = "date"
   rtc = RTC()
   total_time_ms = 5000
-
-  def __init__(self):
-    self.network_clock = NetworkClock()
 
   # take a number and render it to a 2 digit array, with padding/truncation
   def render_to_digit_array(self, num):
@@ -160,10 +160,42 @@ class Date(Menu):
   def handle_button(self, button, is_pressed):
     pass
 
+class Disco(Menu):
+  menu_name = "disco"
+
+  def __init__(self):
+    self.network_clock = NetworkClock()
+
+
+  def start(self, manager):
+    self.manager = manager
+    pass
+
+  def stop(self):
+    pass
+
+  def rand_digit(self):
+    return random.randint(0, 9)
+
+  def rand_bool(self):
+    return random.getrandbits(1) == 1
+  
+  def render(self):
+    digits = [self.rand_digit(), self.rand_digit(), self.rand_digit(), self.rand_digit(), self.rand_digit(), self.rand_digit()]
+    commas = [
+      self.rand_bool(), self.rand_bool(), self.rand_bool(), self.rand_bool(), self.rand_bool(), self.rand_bool(),
+      self.rand_bool(), self.rand_bool(), self.rand_bool(), self.rand_bool(), self.rand_bool(), self.rand_bool()
+    ]
+    return (digits, commas)
+
+  def handle_button(self, button, is_pressed):
+    if is_pressed: self.manager.set_menu("clock")
+
 def main():
   # Delay startup in case we hit an error state, give time for upload before throwing, as thrown errors interrupt upload
   sleep(5)
   menu_manager = MenuManager()
   menu_manager.register_menu(Clock())
   menu_manager.register_menu(Date())
+  menu_manager.register_menu(Disco())
   menu_manager.initialize("clock")
