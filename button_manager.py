@@ -15,7 +15,8 @@ class ButtonManager:
       diff = self.last_bitflags ^ bitflags
       for i in range(12):
         if (diff & (1 << i)):
-          self.handler(self.map_button(i), bitflags & (1 << i))
+          mapped_button = self.map_button(i)
+          if mapped_button != None: self.handler(mapped_button, True if bitflags & (1 << i) else False)
 
       self.last_bitflags = bitflags
 
@@ -24,13 +25,14 @@ class ButtonManager:
 
   # Maps from mpr index to button number (0-5 left to right)
   def map_button(self, button):
-    if (button == 6): return 4 # Might be swapped with below
-    if (button == 7): return 5
-    if (button == 8): return 0 # Might be swapped with below
-    if (button == 9): return 1
-    if (button == 10): return 2 # Might be swapped with below
+    if (button == 6): return 1
+    if (button == 7): return 0
+    if (button == 8): return 5 # ignored?
+    if (button == 9): return 4
+    if (button == 10): return 2
     if (button == 11): return 3
-    raise "wrong button index somehow? " + str(button)
+    print("wrong button index somehow? " + str(button))
+    return None
 
   # Handler takes button (0-5) and is_pressed (bool)
   def set_handler(self, handler):

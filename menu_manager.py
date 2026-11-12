@@ -2,13 +2,12 @@ from machine import Timer, RTC
 from display import Display
 from button_manager import ButtonManager
 from network_clock import NetworkClock
-from time import localtime
+from time import time_ns, sleep
 
 class MenuManager:
   menus = []
   active_menu = None
   menu_change_anim_state = 0
-  menu_change_anim_frame_counter = 0
   next_menu = None
   fps = 24
   timer = Timer(-1)
@@ -25,7 +24,7 @@ class MenuManager:
     self.timer.init(period=1000 // self.fps , callback=callback)
 
   def register_menu(self, menu):
-    self.menus.push(menu)
+    self.menus.append(menu)
 
   def is_in_anim(self):
     return self.next_menu or self.menu_change_anim_state > 0
@@ -35,22 +34,18 @@ class MenuManager:
 
   def render(self):
     if self.next_menu:
-      self.menu_change_anim_frame_counter += 1
-      if self.menu_change_anim_frame_counter == 2:
-        self.menu_change_anim_frame_counter = 0
-        self.menu_change_anim_state += 1
-        if self.menu_change_anim_state == 8:
-          self.active_menu = self.next_menu
-          self.next_menu = None
+      self.menu_change_anim_state += 1
+      if self.menu_change_anim_state == 8:
+        if self.active_menu != None: self.active_menu.stop()
+        self.active_menu = self.next_menu
+        self.active_menu.start(self)
+        self.next_menu = None
     elif self.menu_change_anim_state > 0:
-      self.menu_change_anim_frame_counter += 1
-      if self.menu_change_anim_frame_counter == 2:
-        self.menu_change_anim_frame_counter = 0
-        self.menu_change_anim_state -= 1
+      self.menu_change_anim_state -= 1
     (digits, commas) = self.get_render_data()
     for i in range(6):
       digit = digits[i] or 0
-      self.display.set_digit(i, digit, self.to_brightness(digits[i]))
+      self.display.set_digit(i, digit, self.to_brightness(digits[i] != None))
       self.display.set_digit_commas(i, self.to_brightness(commas[i*2]), self.to_brightness(commas[(i*2) + 1]))
 
   def get_render_data(self):
@@ -94,40 +89,81 @@ class Menu:
 class Clock(Menu):
   menu_name = "clock"
   rtc = RTC()
-  last_button = 0
 
   def __init__(self):
     self.network_clock = NetworkClock()
 
   # take a number and render it to a 2 digit array, with padding/truncation
   def render_to_digit_array(self, num):
-    [(num // 10) % 10, num % 10]
+    return [(num // 10) % 10, num % 10]
 
-  def start(self):
+  def start(self, manager):
+    self.manager = manager
     pass
 
   def stop(self):
     pass
   
   def render(self):
-    t = self.rtc.now()
-    hour = t[3]
-    min = t[4]
-    sec = t[5]
-    # TODO, replace last_button with hour
-    digits = self.render_to_digit_array(self.last_button) + self.render_to_digit_array(min) + self.render_to_digit_array(sec)
-    # Work out how to do commas, needs to be synced to localtime annoyingly
-    # t[6] might be accurate micoseconds, in which case:
-    comma_num = min(t[6] // (1000000 // 12), 11)
+    t = self.rtc.datetime()
+    hours = t[4]
+    minutes = t[5]
+    seconds = t[6]
+    digits = self.render_to_digit_array(hours) + self.render_to_digit_array(minutes) + self.render_to_digit_array(seconds)
+    ms = (time_ns() // 1000000) % 1000
+    comma_num = min(ms // (1000 // 12), 11)
     commas = [False] * 12
     commas[comma_num] = True
     return (digits, commas)
 
   def handle_button(self, button, is_pressed):
-    if not is_pressed: return
-    self.last_button = button
+    if is_pressed and button == 5: self.manager.display.disable()
+    if is_pressed and button == 4: self.manager.display.enable()
+    if is_pressed and button == 0: self.manager.set_menu("date")
+
+class Date(Menu):
+  menu_name = "date"
+  rtc = RTC()
+  total_time_ms = 5000
+
+  def __init__(self):
+    self.network_clock = NetworkClock()
+
+  # take a number and render it to a 2 digit array, with padding/truncation
+  def render_to_digit_array(self, num):
+    return [(num // 10) % 10, num % 10]
+
+  def time_ms(self): return time_ns() // 1000000
+
+  def start(self, manager):
+    self.manager = manager
+    self.time_started_ms = self.time_ms()
+    pass
+
+  def stop(self):
+    pass
+  
+  def render(self):
+    t = self.rtc.datetime()
+    day = t[2]
+    month = t[1]
+    year = t[0] - 2000
+    digits = self.render_to_digit_array(day) + self.render_to_digit_array(month) + self.render_to_digit_array(year)
+    remaining_ms = max(self.time_started_ms + self.total_time_ms - self.time_ms(), 0)
+
+    if remaining_ms == 0: self.manager.set_menu("clock")
+     
+    comma_num = min(remaining_ms // (self.total_time_ms // 13), 12)
+    commas = ([True] * comma_num) + ([False] * (12 - comma_num))
+    return (digits, commas)
+
+  def handle_button(self, button, is_pressed):
+    pass
 
 def main():
+  # Delay startup in case we hit an error state, give time for upload before throwing, as thrown errors interrupt upload
+  sleep(5)
   menu_manager = MenuManager()
-  menu_manager.register(Clock())
-  menu_manager.initialize()
+  menu_manager.register_menu(Clock())
+  menu_manager.register_menu(Date())
+  menu_manager.initialize("clock")

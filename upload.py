@@ -10,5 +10,5 @@ for (root, _, files) in os.walk(".", topdown=True):
     local_path = ":/" + file
     parts.append(f"cp {abs_path} {local_path}")
 
-cmd = "mpremote connect COM5 " + " + ".join(parts)
+cmd = "mpremote connect COM5 " + " + ".join(parts) + " + soft-reset + repl"
 os.system(cmd)

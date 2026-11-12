@@ -65,4 +65,4 @@ class NetworkClock:
     # so we add 1 one mod by 7, then subtract that from current day
     # Sunday would give 0, Saturday would give 6 (so go back to previous sunday), etc.
     day_offset = (last_of_month_tuple[6] + 1) % 7
-    mktime((year, month, 31 - day_offset, 1, 0, 0, 0, 0))
+    return mktime((year, month, 31 - day_offset, 1, 0, 0, 0, 0))

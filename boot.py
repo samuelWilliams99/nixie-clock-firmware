@@ -1,5 +1,5 @@
 import network
-import main
+from menu_manager import main
 from wifi import wifi_name, wifi_password
 sta_if = network.WLAN(network.WLAN.IF_STA)
 if not sta_if.isconnected():
@@ -10,4 +10,4 @@ if not sta_if.isconnected():
         pass
 print('network config:', sta_if.ipconfig('addr4'))
 
-main.main()
+main()
