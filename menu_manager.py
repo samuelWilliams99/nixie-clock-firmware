@@ -119,10 +119,11 @@ class Clock(Menu):
     return (digits, commas)
 
   def handle_button(self, button, is_pressed):
-    if is_pressed and button == 5: self.manager.display.enable()
-    if is_pressed and button == 4: self.manager.display.disable()
-    if is_pressed and (button == 2 or button == 3): self.manager.set_menu("disco")
     if is_pressed and button == 0: self.manager.set_menu("date")
+    if is_pressed and button == 2: self.manager.set_menu("disco")
+    if is_pressed and button == 3: self.manager.set_menu("tubetest")
+    if is_pressed and button == 4: self.manager.display.disable()
+    if is_pressed and button == 5: self.manager.display.enable()
 
 class Date(Menu):
   menu_name = "date"
@@ -191,6 +192,29 @@ class Disco(Menu):
   def handle_button(self, button, is_pressed):
     if is_pressed: self.manager.set_menu("clock")
 
+class TubeTest(Menu):
+  menu_name = "tubetest"
+
+  def start(self, manager):
+    self.manager = manager
+    self.digits = [0] * 6
+    pass
+
+  def stop(self):
+    pass
+
+  def render(self):
+    return (self.digits, [True] * 12)
+
+  def handle_button(self, button, is_pressed):
+    if is_pressed:
+      self.digits[button] = (self.digits[button] + 1) % 10
+      self.last_button = button
+      self.last_down = time_ns()
+    else:
+      if button == self.last_button and time_ns() - self.last_down > 1000000000:
+        self.manager.set_menu("clock")
+
 def main():
   # Delay startup in case we hit an error state, give time for upload before throwing, as thrown errors interrupt upload
   sleep(5)
@@ -198,4 +222,5 @@ def main():
   menu_manager.register_menu(Clock())
   menu_manager.register_menu(Date())
   menu_manager.register_menu(Disco())
+  menu_manager.register_menu(TubeTest())
   menu_manager.initialize("clock")
