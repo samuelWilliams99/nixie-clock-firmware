@@ -3,6 +3,7 @@ from machine import Pin, I2C, Signal
 from digit import Digit
 
 class Display:
+  enabled = False
   def __init__(self):
     self.leds_controllers = Signal(Pin(2, Pin.OUT), invert=True)
     self.high_voltage = Signal(Pin(3, Pin.OUT))
@@ -30,10 +31,16 @@ class Display:
   def enable(self):
     self.leds_controllers.on()
     self.high_voltage.on()
+    self.enabled = True
 
   def disable(self):
     self.leds_controllers.off()
     self.high_voltage.off()
+    self.enabled = False
+
+  def set_enabled(self, enabled):
+    if enabled: self.enable()
+    else: self.disable()
 
   # The sixth digit controls are split across 3 PCAs
   def set_sixth_digit_value(self, output, value):

@@ -9,9 +9,11 @@ class NetworkClock:
   failing_ntp_lookup = False
   # Virtual timer is fine
   timer = Timer(-1)
+  ready_handler = None
 
   # Blocking constructor to setup time
-  def __init__(self):
+  def __init__(self, ready_handler):
+    self.ready_handler = ready_handler
     self.update_time()
 
   # Delay in ms
@@ -29,7 +31,7 @@ class NetworkClock:
         self.failing_ntp_lookup = False
         return time
       except:
-        pass
+        sleep(2)
       self.failing_ntp_lookup = True
       delay = min(delay * 2, 60)
       sleep(delay)
@@ -49,6 +51,10 @@ class NetworkClock:
 
     RTC().datetime((uk_tuple[0], uk_tuple[1], uk_tuple[2], uk_tuple[6] + 1, uk_tuple[3], uk_tuple[4], uk_tuple[5], 0))
     self.time_ready = True
+
+    if self.ready_handler != None:
+      self.ready_handler()
+    self.ready_handler = None
 
     # Update the time at 1:05am each morning
     # First find out tomorrows tuple, to account for month/year rollover

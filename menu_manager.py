@@ -2,7 +2,7 @@ from machine import Timer, RTC
 from display import Display
 from button_manager import ButtonManager
 from network_clock import NetworkClock
-from time import time_ns, sleep
+from time import time_ns, sleep, localtime, mktime
 import random
 
 class MenuManager:
@@ -11,18 +11,53 @@ class MenuManager:
   menu_change_anim_state = 0
   next_menu = None
   fps = 24
-  timer = Timer(-1)
+  render_timer = Timer(-1)
+  display_on_off_timer = Timer(-1)
+  off_hour = 1
+  on_hour = 9
+
+  def set_next_on_off_timer(self, should_change_state = True):
+    t = localtime()
+    current_epoch = mktime(t)
+
+    if self.on_hour > self.off_hour:
+      # The "off" time is in the same day
+      should_be_on = not (self.off_hour <= t[3] < self.on_hour)
+    else:
+      # The "On" time is in the same day
+      should_be_on = self.on_hour <= t[3] < self.off_hour
+
+    if should_be_on:
+      next_hour = self.off_hour
+      if should_change_state: self.display.enable()
+    else:
+      next_hour = self.on_hour
+      if should_change_state: self.display.disable()
+      
+    next_epoch = mktime((t[0], t[1], t[2], next_hour, 5, 0, 0, 0))
+    # If its in the past then switch to tomorrow
+    if next_epoch < current_epoch:
+      next_epoch += 24 * 60 * 60
+
+    delay = next_epoch - current_epoch
+    def callback():
+      self.set_next_on_off_timer()
+    self.display_on_off_timer.init(mode=Timer.ONE_SHOT, period=1000 * delay, callback=callback)
 
   def __init__(self):
     self.display = Display()
     self.button_manager = ButtonManager()
+    def clock_callback():
+      self.set_next_on_off_timer()
+    self.network_clock = NetworkClock(clock_callback)
+
     def handler(button, is_pressed):
       if not self.active_menu or self.is_in_anim(): return
       self.active_menu.handle_button(button, is_pressed)
     self.button_manager.set_handler(handler)
-    def callback(_t):
+    def render_callback(_t):
       self.render()
-    self.timer.init(period=1000 // self.fps , callback=callback)
+    self.render_timer.init(period=1000 // self.fps , callback=render_callback)
 
   def register_menu(self, menu):
     self.menus.append(menu)
@@ -71,7 +106,6 @@ class MenuManager:
 
   def initialize(self, first_menu_name):
     self.set_menu(first_menu_name)
-    self.display.enable()
 
 class Menu:
   menu_name = "<default>"
@@ -93,7 +127,7 @@ class Clock(Menu):
   rtc = RTC()
 
   def __init__(self):
-    self.network_clock = NetworkClock()
+    pass
 
   # take a number and render it to a 2 digit array, with padding/truncation
   def render_to_digit_array(self, num):
@@ -119,11 +153,12 @@ class Clock(Menu):
     return (digits, commas)
 
   def handle_button(self, button, is_pressed):
-    if is_pressed and button == 0: self.manager.set_menu("date")
-    if is_pressed and button == 2: self.manager.set_menu("disco")
-    if is_pressed and button == 3: self.manager.set_menu("tubetest")
-    if is_pressed and button == 4: self.manager.display.disable()
-    if is_pressed and button == 5: self.manager.display.enable()
+    if not is_pressed: return
+    if button == 0: self.manager.set_menu("date")
+    if button == 2: self.manager.set_menu("disco")
+    if button == 3: self.manager.set_menu("tubetest")
+    if button == 4: self.manager.set_menu("setdisplayonoff")
+    if button == 5: self.manager.display.set_enabled(not self.manager.display.enabled)
 
 class Date(Menu):
   menu_name = "date"
@@ -159,14 +194,14 @@ class Date(Menu):
     return (digits, commas)
 
   def handle_button(self, button, is_pressed):
-    pass
+    if not is_pressed: return
+    self.manager.set_menu("clock")
 
 class Disco(Menu):
   menu_name = "disco"
 
   def __init__(self):
-    self.network_clock = NetworkClock()
-
+    pass
 
   def start(self, manager):
     self.manager = manager
@@ -215,12 +250,38 @@ class TubeTest(Menu):
       if button == self.last_button and time_ns() - self.last_down > 1000000000:
         self.manager.set_menu("clock")
 
+class SetDisplayOnOff(Menu):
+  menu_name = "setdisplayonoff"
+
+  def start(self, manager):
+    self.manager = manager
+
+  def render_to_digit_array(self, num):
+    return [(num // 10) % 10, num % 10]
+
+  def stop(self):
+    pass
+
+  def render(self):
+    return (self.render_to_digit_array(self.manager.off_hour) + [None, None] + self.render_to_digit_array(self.manager.on_hour), ([False] * 6) + ([True] * 6))
+
+  def handle_button(self, button, is_pressed):
+    if not is_pressed: return
+    if button == 2 or button == 3:
+      self.manager.set_menu("clock")
+      return
+    if button == 0: self.manager.off_hour = (self.manager.off_hour - 1) % 24
+    if button == 1: self.manager.off_hour = (self.manager.off_hour + 1) % 24
+    if button == 4: self.manager.on_hour = (self.manager.on_hour - 1) % 24
+    if button == 5: self.manager.on_hour = (self.manager.on_hour + 1) % 24
+    self.manager.set_next_on_off_timer(should_change_state=False)
+
 def main():
   # Delay startup in case we hit an error state, give time for upload before throwing, as thrown errors interrupt upload
-  sleep(5)
   menu_manager = MenuManager()
   menu_manager.register_menu(Clock())
   menu_manager.register_menu(Date())
   menu_manager.register_menu(Disco())
   menu_manager.register_menu(TubeTest())
+  menu_manager.register_menu(SetDisplayOnOff())
   menu_manager.initialize("clock")
