@@ -1,4 +1,4 @@
-from micropython_pca9685 import PCA9685
+from pca9685 import PCA9685
 from machine import Pin, I2C, Signal
 from digit import Digit
 

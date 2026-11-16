@@ -1,10 +1,20 @@
 import network
 from menu_manager import main
-from wifi import wifi_name, wifi_password
-sta_if = network.WLAN(network.WLAN.IF_STA)
-if not sta_if.isconnected():
-    print('connecting to network...')
-    sta_if.active(True)
-    sta_if.connect(wifi_name, wifi_password)
+from wifi import known_networks
 
-main()
+sta_if = network.WLAN(network.WLAN.IF_STA)
+print("Scanning for known networks...")
+sta_if.active(True)
+networks = sta_if.scan()
+found = False
+for n in networks:
+  network_name = n[0].decode('utf-8')
+  if network_name in known_networks:
+    found = True
+    print("Found network " + network_name + ", connecting...")
+    sta_if.connect(network_name, known_networks[network_name])
+    break
+if not found:
+  print("Failed to find known network, clock will start with unknown time")
+
+main(found)

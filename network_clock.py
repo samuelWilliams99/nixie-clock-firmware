@@ -1,44 +1,42 @@
 from machine import RTC, Timer
 
-from time import gmtime, mktime, sleep
+from time import gmtime, mktime
 import ntptime
+import _thread
 
 class NetworkClock:
   time_ready = False
-  # Use this for signalling somehow, maybe keep the bottom bar full
-  failing_ntp_lookup = False
   # Virtual timer is fine
   timer = Timer(-1)
   ready_handler = None
+  falloff_timer = Timer(-1)
 
-  # Blocking constructor to setup time
   def __init__(self, ready_handler):
     self.ready_handler = ready_handler
-    self.update_time()
+    self.update_time_after(500)
 
   # Delay in ms
   def update_time_after(self, delay):
     def callback(_t):
-      self.update_time()
+      _thread.start_new_thread(self.update_time, [])
     self.timer.init(mode=Timer.ONE_SHOT, period=delay, callback=callback)
 
   # Tries to get time with exponential falloff, starting at 1s, maxing at 60s
-  def ntp_time_falloff(self):
-    delay = 1
-    while True:
-      try:
-        time = ntptime.time()
-        self.failing_ntp_lookup = False
-        return time
-      except:
-        sleep(2)
-      self.failing_ntp_lookup = True
-      delay = min(delay * 2, 60)
-      sleep(delay)
+  def update_time(self, delay=1):
+    time = None
+    try:
+      time = ntptime.time()
+    except:
+      pass
+    if time != None:
+      self.update_time_with(time)
+    else:
+      print("failed time check")
+      def falloff_callback(_t):
+        _thread.start_new_thread(self.update_time, [min(delay * 2, 60)])
+      self.falloff_timer.init(mode=Timer.ONE_SHOT, period=delay * 1000, callback=falloff_callback)
 
-  def update_time(self):
-    gmt_unix = self.ntp_time_falloff()
-
+  def update_time_with(self, gmt_unix):
     gmt_tuple = gmtime(gmt_unix)
     bst_start_unix = self.get_last_sunday_of_month(gmt_tuple[0], 3)
     bst_end_unix = self.get_last_sunday_of_month(gmt_tuple[0], 10)
