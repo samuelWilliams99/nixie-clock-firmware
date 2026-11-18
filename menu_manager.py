@@ -5,6 +5,8 @@ from network_clock import NetworkClock
 from time import time_ns, localtime, mktime, ticks_ms
 import random
 import network
+import gc
+import math
 
 class MenuManager:
   menus = []
@@ -25,24 +27,25 @@ class MenuManager:
   def is_in_anim(self):
     return self.next_menu or self.menu_change_anim_state > 0
 
-  def to_brightness(self, is_on):
-    return 0x7FFF if is_on else 0
-
   def render(self):
+    # Glow lasts 8 frames
+    self.display.tick_update_glows(6)
     if self.next_menu:
       self.menu_change_anim_state += 1
       if self.menu_change_anim_state == 8:
         if self.active_menu != None: self.active_menu.stop()
         self.active_menu = self.next_menu
         self.active_menu.start()
+        self.display.set_update_glow(self.active_menu.do_update_glow)
         self.next_menu = None
+        if self.active_menu.skip_anim:
+          self.menu_change_anim_state = 0
     elif self.menu_change_anim_state > 0:
       self.menu_change_anim_state -= 1
     (digits, commas) = self.get_render_data()
     for i in range(6):
-      digit = digits[i] or 0
-      self.display.set_digit(i, digit, self.to_brightness(digits[i] != None))
-      self.display.set_digit_commas(i, self.to_brightness(commas[i*2]), self.to_brightness(commas[(i*2) + 1]))
+      self.display.set_digit(i, digits[i])
+      self.display.set_digit_commas(i, commas[i*2], commas[(i*2) + 1])
 
   def get_render_data(self):
     if not self.active_menu:
@@ -71,9 +74,13 @@ class MenuManager:
   # Takes the menu name
   def set_menu(self, menu_name):
     if self.next_menu: return
+    if self.active_menu and self.active_menu.menu_name == menu_name: return
     for menu in self.menus:
       if menu.menu_name == menu_name:
         self.next_menu = menu
+        if self.active_menu and self.active_menu.skip_anim:
+          # One less than max since render will bump it up
+          self.menu_change_anim_state = 7
 
   def initialize(self, network_found):
     self.display = Display()
@@ -97,6 +104,9 @@ class MenuManager:
 
 class Menu:
   menu_name = "<default>"
+  do_update_glow = False
+  no_render = ([None] * 6, [False] * 12)
+  skip_anim = False
 
   def start(self):
     pass
@@ -105,7 +115,7 @@ class Menu:
     pass
 
   def render(self):
-    pass
+    return self.no_render
 
   def handle_button(self, button, is_pressed):
     pass
@@ -116,9 +126,12 @@ class Menu:
 class Clock(Menu):
   menu_name = "clock"
   rtc = RTC()
+  button_5_last_down = None
+  debug_menus = ["memory", "disco", "tubetest"]
+  do_update_glow = True
 
   # take a number and render it to a 2 digit array, with padding/truncation
-  def render_to_digit_array(self, num):
+  def render_to_2_digit_array(self, num):
     return [(num // 10) % 10, num % 10]
 
   def __init__(self, manager):
@@ -126,34 +139,53 @@ class Clock(Menu):
 
   def clock_ready(self):
     self.manager.set_menu(self.menu_name)
+
+  def get_menu_n(self, t_ns):
+    if self.button_5_last_down == None or t_ns - self.button_5_last_down <= 1000000000: return None
+    return min(((t_ns - self.button_5_last_down) // 1000000000), len(self.debug_menus)) - 1
   
   def render(self):
+    t_ns = time_ns()
+    menu_n = self.get_menu_n(t_ns)
+    if menu_n != None:
+      return ([None, None, None, None, None, menu_n], [False] * 12)
+
     t = self.rtc.datetime()
     hours = t[4]
     minutes = t[5]
     seconds = t[6]
-    digits = self.render_to_digit_array(hours) + self.render_to_digit_array(minutes) + self.render_to_digit_array(seconds)
-    ms = (time_ns() // 1000000) % 1000
+    digits = self.render_to_2_digit_array(hours) + self.render_to_2_digit_array(minutes) + self.render_to_2_digit_array(seconds)
+    ms = (t_ns // 1000000) % 1000
     comma_num = min(ms // (1000 // 12), 11)
     commas = [False] * 12
     commas[comma_num] = True
     return (digits, commas)
 
   def handle_button(self, button, is_pressed):
-    if not is_pressed: return
-    if button == 0: self.manager.set_menu("date")
-    if button == 2: self.manager.set_menu("disco")
-    if button == 3: self.manager.set_menu("tubetest")
-    if button == 4: self.manager.set_menu("setdisplayonoff")
-    if button == 5: self.manager.display.set_enabled(not self.manager.display.enabled)
+    if is_pressed and button == 0: self.manager.set_menu("date")
+    if is_pressed and button == 4: self.manager.set_menu("setdisplayonoff")
+    if button == 5:
+      if is_pressed:
+        self.button_5_last_down = time_ns()
+      else:
+        menu_n = self.get_menu_n(time_ns())
+        if menu_n == None:
+          if self.manager.active_menu.menu_name == "off":
+            self.manager.set_menu("clock")
+          else:
+            self.manager.set_menu("off")
+        else:
+          self.manager.set_menu(self.debug_menus[menu_n])
+        self.button_5_last_down = None
 
 class Date(Menu):
   menu_name = "date"
   rtc = RTC()
   total_time_ms = 5000
+  do_update_glow = True
 
   # take a number and render it to a 2 digit array, with padding/truncation
-  def render_to_digit_array(self, num):
+  def render_to_2_digit_array(self, num):
     return [(num // 10) % 10, num % 10]
 
   def time_ms(self): return time_ns() // 1000000
@@ -170,7 +202,7 @@ class Date(Menu):
     day = t[2]
     month = t[1]
     year = t[0] - 2000
-    digits = self.render_to_digit_array(day) + self.render_to_digit_array(month) + self.render_to_digit_array(year)
+    digits = self.render_to_2_digit_array(day) + self.render_to_2_digit_array(month) + self.render_to_2_digit_array(year)
     remaining_ms = max(self.time_started_ms + self.total_time_ms - self.time_ms(), 0)
 
     if remaining_ms == 0: self.manager.set_menu("clock")
@@ -208,6 +240,7 @@ class Disco(Menu):
 
 class TubeTest(Menu):
   menu_name = "tubetest"
+  do_update_glow = True
 
   def __init__(self, manager):
     self.manager = manager
@@ -228,12 +261,38 @@ class TubeTest(Menu):
       if button == self.last_button and time_ns() - self.last_down > 1000000000:
         self.manager.set_menu("clock")
 
+class Memory(Menu):
+  menu_name = "memory"
+
+  def __init__(self, manager):
+    self.manager = manager
+
+  def render_to_n_digit_array(self, num, n):
+    if num == 0: return [0] + ([None] * (n-1))
+    digit_count = math.floor(math.log10(num)) + 1
+    digits = [None] * n
+    # goes right to left on the number
+    for i in range(digit_count):
+      digit = (num // math.floor(math.pow(10, i))) % 10
+      digits[digit_count - i - 1] = digit
+    return digits
+
+  def render(self):
+    allocated_memory = gc.mem_alloc()
+    comma_count = min((allocated_memory * 12) // 446656, 12)
+    commas = ([True] * comma_count) + ([False] * (12 - comma_count))
+    return (self.render_to_n_digit_array(allocated_memory, 6), commas)
+
+  def handle_button(self, button, is_pressed):
+    if is_pressed: self.manager.set_menu("clock")
+
 class SetDisplayOnOff(Menu):
   menu_name = "setdisplayonoff"
   display_on_off_timer = Timer(-1)
   off_hour = 1
   on_hour = 9
   on_off_hour_filename = "on_off_times.txt"
+  do_update_glow = True
 
   def __init__(self, manager):
     self.manager = manager
@@ -272,29 +331,34 @@ class SetDisplayOnOff(Menu):
 
     if should_be_on:
       next_hour = self.off_hour
-      if should_change_state: self.manager.display.enable()
+      print("turn on")
+      if should_change_state:
+        if not self.manager.active_menu or self.manager.active_menu.menu_name == "off": self.manager.set_menu("clock")
     else:
       next_hour = self.on_hour
-      if should_change_state: self.manager.display.disable()
+      print("turn off")
+      if should_change_state: self.manager.set_menu("off")
       
-    next_epoch = mktime((t[0], t[1], t[2], next_hour, 5, 0, 0, 0))
+    next_epoch = mktime((t[0], t[1], t[2], next_hour, 0, 30, 0, 0))
     # If its in the past then switch to tomorrow
     if next_epoch < current_epoch:
       next_epoch += 24 * 60 * 60
 
     delay = next_epoch - current_epoch
-    def callback():
+    print("set timer for " + str(delay))
+    def callback(t):
+      t.deinit()
       self.set_next_on_off_timer()
     self.display_on_off_timer.init(mode=Timer.ONE_SHOT, period=1000 * delay, callback=callback)
 
   def clock_ready(self):
     self.set_next_on_off_timer()
 
-  def render_to_digit_array(self, num):
+  def render_to_2_digit_array(self, num):
     return [(num // 10) % 10, num % 10]
 
   def render(self):
-    return (self.render_to_digit_array(self.off_hour) + [None, None] + self.render_to_digit_array(self.on_hour), ([False] * 6) + ([True] * 6))
+    return (self.render_to_2_digit_array(self.off_hour) + [None, None] + self.render_to_2_digit_array(self.on_hour), ([False] * 6) + ([True] * 6))
 
   def handle_button(self, button, is_pressed):
     if not is_pressed: return
@@ -308,6 +372,21 @@ class SetDisplayOnOff(Menu):
     self.write_on_off_hour()
     self.set_next_on_off_timer(should_change_state=False)
 
+class Off(Menu):
+  menu_name = "off"
+  skip_anim = True
+  def __init__(self, manager):
+    self.manager = manager
+
+  def start(self):
+    self.manager.display.disable()
+
+  def stop(self):
+    self.manager.display.enable()
+
+  def handle_button(self, button, is_pressed):
+    if is_pressed: self.manager.set_menu("clock")
+
 def main(network_found):
   # Delay startup in case we hit an error state, give time for upload before throwing, as thrown errors interrupt upload
   menu_manager = MenuManager()
@@ -316,4 +395,6 @@ def main(network_found):
   menu_manager.register_menu(Disco)
   menu_manager.register_menu(TubeTest)
   menu_manager.register_menu(SetDisplayOnOff)
+  menu_manager.register_menu(Memory)
+  menu_manager.register_menu(Off)
   menu_manager.initialize(network_found)

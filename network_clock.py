@@ -9,7 +9,6 @@ class NetworkClock:
   # Virtual timer is fine
   timer = Timer(-1)
   ready_handler = None
-  falloff_timer = Timer(-1)
 
   def __init__(self, ready_handler):
     self.ready_handler = ready_handler
@@ -17,7 +16,8 @@ class NetworkClock:
 
   # Delay in ms
   def update_time_after(self, delay):
-    def callback(_t):
+    def callback(t):
+      t.deinit()
       _thread.start_new_thread(self.update_time, [])
     self.timer.init(mode=Timer.ONE_SHOT, period=delay, callback=callback)
 
@@ -26,15 +26,15 @@ class NetworkClock:
     time = None
     try:
       time = ntptime.time()
-    except:
-      pass
+    except Exception as e:
+      print("failed time check: " + str(e))
     if time != None:
       self.update_time_with(time)
     else:
-      print("failed time check")
-      def falloff_callback(_t):
+      def falloff_callback(t):
+        t.deinit()
         _thread.start_new_thread(self.update_time, [min(delay * 2, 60)])
-      self.falloff_timer.init(mode=Timer.ONE_SHOT, period=delay * 1000, callback=falloff_callback)
+      self.timer.init(mode=Timer.ONE_SHOT, period=delay * 1000, callback=falloff_callback)
 
   def update_time_with(self, gmt_unix):
     gmt_tuple = gmtime(gmt_unix)
