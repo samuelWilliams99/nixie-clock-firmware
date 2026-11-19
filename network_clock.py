@@ -16,6 +16,7 @@ class NetworkClock:
 
   # Delay in ms
   def update_time_after(self, delay):
+    print(f"Next time update in {delay//1000} seconds")
     def callback(t):
       t.deinit()
       _thread.start_new_thread(self.update_time, [])

@@ -8,6 +8,7 @@ for (root, _, files) in os.walk(".", topdown=True):
     if not file.endswith(".py"): continue
     if file == "upload.py": continue
     if file == "wifi.py": continue
+    if file == "location.py": continue
     abs_path = os.path.abspath(root + "\\" + file)
     local_path = ":/" + file
     parts.append(f"cp {abs_path} {local_path}")

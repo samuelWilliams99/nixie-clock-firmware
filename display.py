@@ -7,13 +7,16 @@ class Display:
   enabled = False
   # Whether updates to display should pulse higher brightness
   update_glow = False
-  normal_brightness = 0x4FFF
-  glow_brightness = 0xEFFF
+  normal_brightness = 3
+  glow_brightness = 10
+  max_brightness_duty = 0xEFFF
+  brightness_data_filename = "brightness_data.txt"
   # Float from 0 to 1 for glow amount
   digit_glows = [0.0] * 6
   # Used only for glows, each digit tracks its own actual updates to the led drivers
   digit_prev_values = [None] * 6
   def __init__(self):
+    self.read_brightness_data()
     self.leds_controllers = Signal(Pin(2, Pin.OUT), invert=True)
     self.high_voltage = Signal(Pin(3, Pin.OUT))
     self.disable()
@@ -51,6 +54,36 @@ class Display:
     if enabled: self.enable()
     else: self.disable()
 
+  # No-op if file no exist
+  def read_brightness_data(self):
+    try:
+      f = open(self.brightness_data_filename)
+      content = f.read()
+      f.close()
+      contents = content.split("\n")
+      self.normal_brightness = int(contents[0])
+      self.glow_brightness = int(contents[1])
+    except:
+      pass
+
+  def write_brightness_data(self):
+    content = str(self.normal_brightness) + "\n" + str(self.glow_brightness)
+    f = open(self.brightness_data_filename, "w")
+    f.write(content)
+    f.close()
+
+  # Takes an int from 0-10
+  def set_normal_brightness(self, value):
+    assert 0 <= value <= 10
+    self.normal_brightness = value
+    self.write_brightness_data()
+
+  # Takes an int from 0-10
+  def set_glow_brightness(self, value):
+    assert 0 <= value <= 10
+    self.glow_brightness = value
+    self.write_brightness_data()
+
   # The sixth digit controls are split across 3 PCAs
   def set_sixth_digit_value(self, output, value):
     if output <= 3:
@@ -67,9 +100,13 @@ class Display:
     self.update_glow = update_glow
     self.digit_glows = [0.0] * 6
 
+  # Takes value from 0 to 10
+  def to_duty_cycle(self, value):
+    return math.floor((self.max_brightness_duty * value) / 10)
+
   def to_digit_brightness(self, digit_index):
-    if not self.update_glow: return self.normal_brightness
-    return self.normal_brightness + math.floor(self.digit_glows[digit_index] * (self.glow_brightness - self.normal_brightness))
+    if not self.update_glow: return self.to_duty_cycle(self.normal_brightness)
+    return max(0, self.to_duty_cycle(self.normal_brightness) + math.floor(self.digit_glows[digit_index] * self.to_duty_cycle(self.glow_brightness - self.normal_brightness)))
 
   # Takes the number of "ticks" (i.e. calls to this function) to return a digit to normal brightness
   def tick_update_glows(self, tick_count):
@@ -79,6 +116,11 @@ class Display:
       if self.digit_glows[digit_index] > 0.0:
         self.digit_glows[digit_index] = max(0, self.digit_glows[digit_index] - diff)
         self.digits[digit_index].set_digit(self.digit_prev_values[digit_index], self.to_digit_brightness(digit_index))
+
+  def pulse_glow(self):
+    if not self.update_glow: return
+    for digit_index in range(6):
+      self.digit_glows[digit_index] = 1.0
 
   # Handles updating the digit_glows for a set event
   def update_glows_for_digit_change(self, digit_index, number):
@@ -98,7 +140,7 @@ class Display:
     self.digits[digit_index].set_digit(number or 0, value)
 
   def to_comma_brightness(self, is_on):
-    return self.normal_brightness if is_on else 0
+    return self.to_duty_cycle(self.normal_brightness) if is_on else 0
 
   def set_digit_commas(self, digit_index, comma_l, comma_r):
     assert digit_index >= 0 and digit_index <= 5
