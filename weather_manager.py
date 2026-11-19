@@ -20,14 +20,21 @@ class WeatherManager:
   max_rain_probability = 0
 
   ready = False
+  clock_initialized = False
 
   update_data_timer = Timer(-1)
   request_url = f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,relative_humidity_2m_max,relative_humidity_2m_min,precipitation_probability_min&hourly=precipitation_probability&current=temperature_2m,relative_humidity_2m&timezone=Europe%2FLondon&forecast_days=1&forecast_hours=1"
 
-  def __init__(self):
-    pass
+  def __init__(self, network_manager):
+    self.network_manager = network_manager
+    network_manager.add_handler(self.network_connected)
+
+  def network_connected(self):
+    if self.clock_initialized:
+      self.trigger_update_next_hour(True)
 
   def clock_ready(self):
+    self.clock_initialized = True
     self.trigger_update_next_hour(True)
 
   def trigger_update_next_hour(self, trigger_now = False):
@@ -45,6 +52,9 @@ class WeatherManager:
   # Should be run in a bg thread
   # Calls self every hour
   def update_data(self):
+    if not self.network_manager.check_wifi():
+      self.ready = False
+      return
     res = requests.get(self.request_url)
     if res.status_code != 200:
       print(res)

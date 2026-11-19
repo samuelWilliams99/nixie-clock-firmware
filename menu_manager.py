@@ -3,6 +3,7 @@ from display import Display
 from button_manager import ButtonManager
 from network_clock import NetworkClock
 from weather_manager import WeatherManager
+from network_manager import NetworkManager
 from time import time_ns, localtime, mktime, ticks_ms
 import random
 import network
@@ -16,10 +17,10 @@ class MenuManager:
   next_menu = None
   fps = 24
   render_timer = Timer(-1)
-  wlan = network.WLAN(network.STA_IF)
 
   def __init__(self):
-    self.weather_manager = WeatherManager()
+    self.network_manager = NetworkManager()
+    self.weather_manager = WeatherManager(self.network_manager)
 
   def register_menu(self, make_menu):
     menu = make_menu(self)
@@ -53,7 +54,7 @@ class MenuManager:
       # Loading menu, sliding dot means connecting to internet, alternating means getting time
       t = ticks_ms()
       n = t // 100
-      if self.wlan.isconnected():
+      if self.network_manager.isconnected():
         if n % 4 > 1:
           return ([None] * 6, [True, False] * 6)
         else:
@@ -83,17 +84,15 @@ class MenuManager:
           # One less than max since render will bump it up
           self.menu_change_anim_state = 7
 
-  def initialize(self, network_found):
+  def initialize(self):
     self.display = Display()
     self.button_manager = ButtonManager()
     def clock_callback():
       for menu in self.menus:
         menu.clock_ready()
       self.weather_manager.clock_ready()
-    if network_found:
-      self.network_clock = NetworkClock(clock_callback)
-    else:
-      clock_callback()
+
+    self.network_clock = NetworkClock(self.network_manager, clock_callback)
 
     def handler(button, is_pressed):
       if not self.active_menu or self.is_in_anim(): return
@@ -103,6 +102,7 @@ class MenuManager:
       self.render()
     self.render_timer.init(period=1000 // self.fps , callback=render_callback)
     self.display.enable()
+    self.network_manager.connect()
 
 class Menu:
   menu_name = "<default>"
@@ -535,7 +535,7 @@ class Off(Menu):
   def handle_button(self, button, is_pressed):
     if is_pressed: self.manager.set_menu("clock")
 
-def main(network_found):
+def main():
   # Delay startup in case we hit an error state, give time for upload before throwing, as thrown errors interrupt upload
   menu_manager = MenuManager()
   menu_manager.register_menu(Clock)
@@ -549,4 +549,4 @@ def main(network_found):
   menu_manager.register_menu(Temperature)
   menu_manager.register_menu(Humidity)
   menu_manager.register_menu(RainProbability)
-  menu_manager.initialize(network_found)
+  menu_manager.initialize()

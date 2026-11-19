@@ -10,9 +10,13 @@ class NetworkClock:
   timer = Timer(-1)
   ready_handler = None
 
-  def __init__(self, ready_handler):
+  def __init__(self, network_manager, ready_handler):
     self.ready_handler = ready_handler
-    self.update_time_after(500)
+    self.network_manager = network_manager
+    network_manager.add_handler(self.network_connected)
+
+  def network_connected(self):
+    self.update_time_after(1000)
 
   # Delay in ms
   def update_time_after(self, delay):
@@ -24,6 +28,7 @@ class NetworkClock:
 
   # Tries to get time with exponential falloff, starting at 1s, maxing at 60s
   def update_time(self, delay=1):
+    if not self.network_manager.check_wifi(): return
     time = None
     try:
       time = ntptime.time()
