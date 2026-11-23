@@ -4,6 +4,7 @@ from button_manager import ButtonManager
 from network_clock import NetworkClock
 from weather_manager import WeatherManager
 from network_manager import NetworkManager
+from timer_manager import TimerManager
 from time import time_ns, localtime, mktime, ticks_ms
 import random
 import network
@@ -19,8 +20,9 @@ class MenuManager:
   render_timer = Timer(-1)
 
   def __init__(self):
-    self.network_manager = NetworkManager()
-    self.weather_manager = WeatherManager(self.network_manager)
+    self.timer_manager = TimerManager()
+    self.network_manager = NetworkManager(self.timer_manager)
+    self.weather_manager = WeatherManager(self.network_manager, self.timer_manager)
 
   def register_menu(self, make_menu):
     menu = make_menu(self)
@@ -92,13 +94,14 @@ class MenuManager:
         menu.clock_ready()
       self.weather_manager.clock_ready()
 
-    self.network_clock = NetworkClock(self.network_manager, clock_callback)
+    self.network_clock = NetworkClock(self.network_manager, self.timer_manager, clock_callback)
 
     def handler(button, is_pressed):
       if not self.active_menu or self.is_in_anim(): return
       self.active_menu.handle_button(button, is_pressed)
     self.button_manager.set_handler(handler)
     def render_callback(_t):
+      self.timer_manager.tick()
       self.render()
     self.render_timer.init(period=1000 // self.fps , callback=render_callback)
     self.display.enable()
@@ -327,7 +330,6 @@ class Memory(Menu):
 
 class SetDisplayOnOff(Menu):
   menu_name = "setdisplayonoff"
-  display_on_off_timer = Timer(-1)
   off_hour = 1
   on_hour = 9
   on_off_hour_filename = "on_off_times.txt"
@@ -385,10 +387,7 @@ class SetDisplayOnOff(Menu):
 
     delay = next_epoch - current_epoch
     print(f"Next on-off update in {delay} seconds")
-    def callback(t):
-      t.deinit()
-      self.set_next_on_off_timer()
-    self.display_on_off_timer.init(mode=Timer.ONE_SHOT, period=1000 * delay, callback=callback)
+    self.manager.timer_manager.start_timer(name="display-on-off", delay=delay, callback=self.set_next_on_off_timer)
 
   def clock_ready(self):
     self.set_next_on_off_timer()

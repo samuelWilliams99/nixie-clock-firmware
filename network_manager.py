@@ -1,4 +1,3 @@
-from machine import Timer
 import _thread
 import network
 from wifi import known_networks
@@ -6,9 +5,9 @@ from wifi import known_networks
 class NetworkManager:
   sta_if = network.WLAN(network.WLAN.IF_STA)
   handlers = []
-  timer = Timer(-1)
 
-  def __init__(self):
+  def __init__(self, timer_manager):
+    self.timer_manager = timer_manager
     self.sta_if.active(True)
 
   def add_handler(self, handler):
@@ -42,25 +41,23 @@ class NetworkManager:
     if network_name != None:
       print("Found network " + network_name + ", connecting...")
       self.sta_if.connect(network_name, known_networks[network_name])
-      def connecting_callback(t):
+      def connecting_callback():
         status = self.sta_if.status()
         # Micropython is missing this status code for some reason
         STAT_NOIP = 2
         if self.sta_if.isconnected():
-          t.deinit()
           print("Connected successfully")
           for handler in self.handlers:
             handler()
         elif status not in [network.STAT_CONNECTING, STAT_NOIP, network.STAT_NO_AP_FOUND]:
           print(f"Connection failed {status}, retrying...")
-          t.deinit()
           self.connect()
         else:
           print("Waiting for connection...")
-      self.timer.init(period=1000, callback=connecting_callback)
+          start_timer()
+      def start_timer():
+        self.timer_manager.start_timer(name="network-connection", delay=1, callback=connecting_callback)
+      start_timer()
     else:
-      print("Failed to find known network, retrying in 60s")
-      def connect_callback(t):
-        t.deinit()
-        self.connect()
-      self.timer.init(mode=Timer.ONE_SHOT, period=60000, callback=connect_callback)
+      print("Failed to find known network, retrying in 10s")
+      self.timer_manager.start_timer(name="network-connection", delay=10, callback=self.connect)

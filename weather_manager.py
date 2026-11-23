@@ -1,4 +1,3 @@
-from machine import Timer
 import requests
 import json
 import _thread
@@ -22,11 +21,11 @@ class WeatherManager:
   ready = False
   clock_initialized = False
 
-  update_data_timer = Timer(-1)
   request_url = f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,relative_humidity_2m_max,relative_humidity_2m_min,precipitation_probability_min&hourly=precipitation_probability&current=temperature_2m,relative_humidity_2m&timezone=Europe%2FLondon&forecast_days=1&forecast_hours=1"
 
-  def __init__(self, network_manager):
+  def __init__(self, network_manager, timer_manager):
     self.network_manager = network_manager
+    self.timer_manager = timer_manager
     network_manager.add_handler(self.network_connected)
 
   def network_connected(self):
@@ -38,16 +37,15 @@ class WeatherManager:
     self.trigger_update_next_hour(True)
 
   def trigger_update_next_hour(self, trigger_now = False):
-    def callback(t):
-      t.deinit()
-      _thread.start_new_thread(self.update_data, [])
     if trigger_now:
       delay = 1
     else:
       t = localtime()
       delay = (60 - t[4]) * 60
     print(f"Next weather update in {delay} seconds")
-    self.update_data_timer.init(mode=Timer.ONE_SHOT, period=delay * 1000, callback=callback)
+    def callback():
+      _thread.start_new_thread(self.update_data, [])
+    self.timer_manager.start_timer(name="weather-update", delay=delay, callback=callback)
 
   # Should be run in a bg thread
   # Calls self every hour
