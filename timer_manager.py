@@ -5,7 +5,9 @@ class TimerManager:
 
   # Takes delay in seconds
   def start_timer(self, name, delay, callback):
-    self.timers[name] = Timer(callback, time_ns() + delay * 1000000000)
+    next_trigger = time_ns() + delay * 1000000000
+    print(f"added timer for {name} at {next_trigger}")
+    self.timers[name] = Timer(callback, next_trigger)
 
   # Account for time skipping when network clock updates RTC
   def time_skip(self, amount_ns):
@@ -14,11 +16,11 @@ class TimerManager:
 
   def tick(self):
     time = time_ns()
-    for name, timer in self.timers.items():
+    for name, timer in self.timers.copy().items():
       if timer.next_trigger < time:
         print(f"Running timer for {name}")
-        timer.callback()
         del self.timers[name]
+        timer.callback()
 
 class Timer:
   next_trigger = None
